@@ -5,6 +5,8 @@
 #include <mutex>
 #include <unistd.h>
 #include <link.h>
+#include <cerrno>
+#include <sys/mman.h>
 #include <elf.h>
 #include <android/log.h>
 
@@ -94,6 +96,22 @@ constexpr BuildOffsets kBuildOffsets3915{
     0x7B73A54,   // Level::_render
     0x7463BF4,   // ClientInstance::getCamera
     0xA7905A4,   // newReceivePacket
+};
+
+// 3.10.5.301327（build-id a494de85…）。
+//
+// 不是靠平移算出来的：这版同一区段内的平移量已经互不相同，抄旧偏移会把
+// hook 装进别的函数中间。这六个值来自 tools/hooks.json 里每条规则的特征
+// 窗口，对该镜像全文扫描后唯一命中；其中三个在已有记录里能核对
+// （getClientInstance / getDimension / _render 完全一致），
+// Minecraft_update_Hook 也正好落在 LocalPlayer vtable 第 29 槽。
+constexpr BuildOffsets kBuildOffsets3105{
+    0x759A408,   // Actor::getClientInstance
+    0xCE8EBA0,   // Actor::getDimension
+    0x759B6C8,   // Actor::normalTick
+    0x7CFCB90,   // Level::_render
+    0x7548774,   // ClientInstance::getCamera
+    0xA3A6464,   // newReceivePacket
 };
 
 void applyBuildOffsets(const BuildOffsets& o) {
@@ -442,6 +460,52 @@ bool FunctionsAddress::pyTrace() {
     return on;
 }
 
+// ── 3.10.5 的源码编译拦截 ────────────────────────────────────────────
+//
+// 3.10.5 的 PyRun_StringFlags 在编译成功之后，无条件再调一次拦截函数
+// （相对 PyRun_StringFlags +0xCC，实际地址 0x119314D4）：它打一行
+// "[SCRIPT_SEC] runtime compile blocked"、设 RuntimeError("exec failed")
+// 并返回 NULL。于是外面看到的永远是 exec failed，代码一次都没执行。
+//
+// 那条 bl 换成 nop 就绕开了：x0 里还是刚编译好的 code object，紧跟的
+// cbz 不跳，下一条就是真正执行。改之前先比对原指令，对不上（版本不同 /
+// 已经改过）就原样放过，不动别人的内存。
+namespace {
+
+// PyRun_StringFlags 内拦截调用点的相对偏移。反汇编核对：
+// 119c4b20 bl 编译 → 119c4b24 cbz → 119c4b38 bl 0x119314d4 → 119c4b3c cbz
+constexpr uintptr_t kBlockCallOffset = 0xCC;
+constexpr uint32_t kNop = 0xD503201FU;
+
+bool patchScriptCompileBlock(uintptr_t base, uintptr_t run_flags_rva) {
+    if (base == 0 || run_flags_rva == 0) return false;
+    auto* site = reinterpret_cast<uint32_t*>(base + run_flags_rva + kBlockCallOffset);
+
+    const uint32_t original = *site;
+    // bl 编码：0x94000000 | imm26。只认 BL，别的（已经被改成 nop、或换版本）
+    // 一律不碰。
+    if ((original & 0xFC000000U) != 0x94000000U) {
+        LOGI("script block: call site is not a BL (0x%08x), left untouched", original);
+        return false;
+    }
+
+    const long page = sysconf(_SC_PAGESIZE);
+    void* page_start = reinterpret_cast<void*>(
+        reinterpret_cast<uintptr_t>(site) & ~static_cast<uintptr_t>(page - 1));
+    if (mprotect(page_start, static_cast<size_t>(page), PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+        LOGE("script block: mprotect failed: %s", std::strerror(errno));
+        return false;
+    }
+    *site = kNop;
+    __builtin___clear_cache(reinterpret_cast<char*>(site), reinterpret_cast<char*>(site) + 4);
+    mprotect(page_start, static_cast<size_t>(page), PROT_READ | PROT_EXEC);
+
+    LOGI("script block: patched BL at 0x%lx -> NOP", (unsigned long)(base + run_flags_rva + kBlockCallOffset));
+    return true;
+}
+
+}  // namespace
+
 void FunctionsAddress::detect() {
     std::lock_guard<std::mutex> lock(g_detectMutex);
     if (g_detected) return;
@@ -528,9 +592,18 @@ void FunctionsAddress::detect() {
     // 建筑侧：沿用同一张表的版本归属。
     if (sel->addr == ADDR_3915) {
         applyBuildOffsets(kBuildOffsets3915);
+    } else if (sel->addr == ADDR_3105) {
+        applyBuildOffsets(kBuildOffsets3105);
     } else {
+        // 3.10.0 尚无核验值，建筑功能整体关闭而不是硬装。
         clearBuildOffsets();
     }
+    // 3.10.x 之后 PyRun_StringFlags 编译完会无条件被拦截，必须打掉那条 bl。
+    // 3.9.15 走的是 setExecLocked 全局开关，不需要改代码。
+    if (sel->addr == ADDR_3105 || sel->addr == ADDR_310) {
+        patchScriptCompileBlock(Main::getBaseAddress(), PythonUtils_PyRun_StringFlagsMC);
+    }
+
     snprintf(g_reason, sizeof(g_reason), "ok %s", sel->name);
 
     LOGI("detect: 使用 %s 地址表 GIL=0x%lx addmod=0x%lx getdict=0x%lx runstr=0x%lx rel=0x%lx",
