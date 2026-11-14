@@ -6,6 +6,14 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+// 正式签名是否可用：keystore 文件存在且密码不为空。
+// 任一项缺失就走 debug 签名，避免整包构建失败。
+fun canSignRelease(): Boolean {
+    val store = rootProject.file(System.getenv("KEYSTORE_PATH") ?: "keystore/release.jks")
+    val pwd = System.getenv("KEYSTORE_PASSWORD") ?: ""
+    return store.isFile && pwd.isNotEmpty()
+}
+
 android {
     namespace = "com.kael.texinject"
     compileSdk = 36
@@ -57,7 +65,16 @@ android {
 
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            // 有正式密钥就用正式签名；没有就退回 debug 签名。
+            //
+            // 缺密钥时 Release 会在 package 阶段直接失败（keystore 读不了），
+            // 整个包都拿不到。debug 签名照样能装、能测，只是不能覆盖已安装
+            // 的正式版。CI 上没配 secrets 时走这条路。
+            signingConfig = if (canSignRelease()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

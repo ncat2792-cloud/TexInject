@@ -49,12 +49,19 @@ jobs:
         run: |
           set -e
           chmod +x gradlew
-          mkdir -p keystore
-          echo "${{ secrets.SIGNING_KEY }}" | base64 -d > keystore/release.jks
+          # 有正式密钥就还原；没有就留空，Gradle 侧会自动改用 debug 签名。
+          if [ -n "${{ secrets.SIGNING_KEY }}" ]; then
+            mkdir -p keystore
+            echo "${{ secrets.SIGNING_KEY }}" | base64 -d > keystore/release.jks
+            echo "使用正式签名"
+          else
+            echo "未配置签名密钥，改用 debug 签名"
+          fi
           ./gradlew assembleRelease --build-cache
           VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           mkdir -p out
           cp app/build/outputs/apk/release/*.apk "out/TexInject-$VER.apk"
+          echo "产物：out/TexInject-$VER.apk"
 
       - uses: actions/upload-artifact@v4
         with:
