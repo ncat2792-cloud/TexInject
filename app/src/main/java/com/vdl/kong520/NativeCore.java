@@ -64,6 +64,9 @@ public final class NativeCore {
      */
     public static native void ensureBuildToolsHooks();
 
+    /** 地址/引擎状态，供面板判断能否打开建筑页。 */
+    public static native String addressResolutionStatus();
+
     /** Claims one pending, validated anvil-window close request, or returns zero. */
     public static native long takePendingMapAnvilUiCloseRequest();
 

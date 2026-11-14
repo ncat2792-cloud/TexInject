@@ -591,8 +591,26 @@ void markMapChestUiCloseDispatched(JNIEnv*, jclass, jlong ticket) {
     build_import::MarkMapChestUiCloseDispatched(static_cast<uint64_t>(ticket));
 }
 
+/** 建筑工具状态，供面板判断能否打开建筑页。 */
+jstring addressResolutionStatus(JNIEnv* env, jclass) {
+    if (!env) return nullptr;
+    // 面板用 startsWith("已就绪") 判断可用性。
+    std::string text = "已就绪：建筑工具";
+    if (Main::getBaseAddress() == 0) {
+        text = "游戏原生库尚未加载";
+    } else if (FunctionsAddress::Minecraft_update_Hook == 0) {
+        // 这是当前唯一会让建筑功能整体不可用的条件：版本没核验过。
+        std::string reason = FunctionsAddress::detectReason();
+        text = reason.empty() ? "当前游戏版本不支持建筑功能"
+                              : std::string("当前游戏版本不支持建筑功能：") + reason;
+    }
+    return env->NewStringUTF(text.c_str());
+}
+
 const JNINativeMethod build_native_methods[] = {
     {"ensureBuildToolsHooks", "()V", reinterpret_cast<void*>(ensureNativeHooks)},
+    {"addressResolutionStatus", "()Ljava/lang/String;",
+     reinterpret_cast<void*>(addressResolutionStatus)},
     {"takePendingMapAnvilUiCloseRequest", "()J",
      reinterpret_cast<void*>(takePendingMapAnvilUiCloseRequest)},
     {"isMapAnvilUiCloseStillSafe", "(J)Z",
