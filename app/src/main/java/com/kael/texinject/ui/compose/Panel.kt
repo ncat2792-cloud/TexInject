@@ -430,7 +430,7 @@ private fun PanelCard(
                         }
                         "音乐" -> AndroidView({ MusicPlayer.buildView(activity) }, Modifier.fillMaxSize())
                         "脚本" -> AndroidView({ PyLoaderUi.buildView(activity) }, Modifier.fillMaxSize())
-                        // 建筑页自己管理滚动与列表高度，外面不再套 verticalScroll
+                        // 建筑页自己套 verticalScroll，外面不再套一层
                         "建筑" -> BuildTab(activity)
                         "快捷键" -> {
                             val cfg = hkCfg
