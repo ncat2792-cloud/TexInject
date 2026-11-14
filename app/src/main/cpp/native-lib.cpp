@@ -711,3 +711,16 @@ bool ResolveMinecraftExecutableOffset(uintptr_t base_address, uintptr_t offset,
     *address = target;
     return true;
 }
+
+// 投影所需的 tick + 渲染 hook。面板在打开投影前会单独请求一次，
+// 所以这里不依赖 installBuildHooks 是否已经跑过。
+bool EnsureBuildProjectionHooksReady() {
+    const uintptr_t base_address = Main::getBaseAddress();
+    if (base_address == 0) return false;
+    if (FunctionsAddress::Minecraft_update_Hook == 0) {
+        // 当前游戏版本没有核验过的偏移，明确失败而不是硬装。
+        return false;
+    }
+    return InitMinecraftUpdateHook(base_address) &&
+           build_import::InitBuildProjectionHook(base_address);
+}

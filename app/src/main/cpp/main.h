@@ -32,4 +32,8 @@ public:
 bool ResolveMinecraftExecutableOffset(uintptr_t base_address, uintptr_t offset,
                                       size_t required_size, uintptr_t* address);
 
+// 建筑投影需要 tick + 渲染两条 hook；面板打开投影时单独调用，
+// 不依赖启动期是否已经装过。
+bool EnsureBuildProjectionHooksReady();
+
 #endif
