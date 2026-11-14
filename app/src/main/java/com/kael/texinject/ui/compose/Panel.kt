@@ -371,14 +371,19 @@ private fun PanelCard(
                     .devBox()
             ) {
 
+                // 侧栏：分类多了就滑动。
+                //
+                // 原来用 weight(1f) 均分高度，分类一多每行就被压到看不见；
+                // 改成固定行高 + verticalScroll，条目多了能滑，条目少了也不会
+                // 拉伸成一大片空白色块。
                 Column(
                     Modifier
                         .width(96.dp)
-
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(12.dp))
                         .background(SidebarBg)
                         .padding(4.dp)
+                        .verticalScroll(rememberScrollState())
                         .devBox()
                 ) {
                     cats.forEachIndexed { i, name ->
@@ -388,8 +393,7 @@ private fun PanelCard(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-
-                                .weight(1f)
+                                .heightIn(min = 40.dp)
                                 .clip(RoundedCornerShape(9.dp))
                                 .background(if (name == selected) Accent else Color.Transparent)
                                 .clickable { onSelect(name) }
