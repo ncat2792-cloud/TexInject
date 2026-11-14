@@ -29,6 +29,7 @@
 #include "tp/MinecraftUpdateHook.h"
 #include "tp/FunctionsAddress.h"
 #include "tp/TpModule.h"
+#include "addrscan/Resolver.h"
 #include "trace/IoTrace.h"
 #include "tp/PythonUtils.h"
 #include "common/Signatures.h"
@@ -99,6 +100,22 @@ void ensureBase() {
 // 不可用，其余功能不受影响。这与「带着 3.9.15 的偏移去 3.10.5 装 hook」
 // 是两种完全不同的结果：后者会跳进未映射内存直接闪退。
 void installBuildHooks(uintptr_t base) {
+    // 3.10.x 的地址不能靠固定偏移（区段内平移量不一致，抄旧值会把 hook
+    // 装进别的函数中间）。先按特征解析：只有全部规则在该镜像上唯一命中
+    // 才会发布地址，否则一个 hook 都不装。
+    //
+    // 3.9.15 走 FunctionsAddress 的固定表，这边解析失败也不影响它。
+    if (FunctionsAddress::Minecraft_update_Hook == 0) {
+        std::string address_error;
+        bool retryable = false;
+        if (buildtools::addrscan::Initialize(&address_error, &retryable)) {
+            LOGI("addrscan: %s", buildtools::addrscan::StatusText().c_str());
+        } else {
+            LOGE("addrscan failed (%s): %s",
+                 retryable ? "retry later" : "terminal for this build",
+                 address_error.c_str());
+        }
+    }
     if (FunctionsAddress::Minecraft_update_Hook == 0) {
         LOGI("build hooks skipped: no verified offsets for this game build");
         return;
