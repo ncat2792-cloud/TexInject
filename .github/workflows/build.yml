@@ -53,7 +53,14 @@ jobs:
           if [ -n "${{ secrets.SIGNING_KEY }}" ]; then
             mkdir -p keystore
             echo "${{ secrets.SIGNING_KEY }}" | base64 -d > keystore/release.jks
-            echo "使用正式签名"
+            # 解出来是空文件说明 secret 内容不是合法 base64，按「没有密钥」处理，
+            # 否则后面会带着一个读不了的 jks 走到 package 阶段。
+            if [ ! -s keystore/release.jks ]; then
+              echo "签名密钥解码为空，改用 debug 签名"
+              rm -f keystore/release.jks
+            else
+              echo "使用正式签名"
+            fi
           else
             echo "未配置签名密钥，改用 debug 签名"
           fi

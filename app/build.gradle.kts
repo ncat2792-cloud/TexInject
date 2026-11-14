@@ -11,7 +11,12 @@ plugins {
 fun canSignRelease(): Boolean {
     val store = rootProject.file(System.getenv("KEYSTORE_PATH") ?: "keystore/release.jks")
     val pwd = System.getenv("KEYSTORE_PASSWORD") ?: ""
-    return store.isFile && pwd.isNotEmpty()
+    // 必须同时满足：文件存在、且不是空文件、密码非空。
+    //
+    // 只判 isFile 不够：CI 上用 `base64 -d` 解未配置的 secret 会留下一个
+    // 0 字节的 release.jks，于是这里误判为「有正式签名」，一路走到 package
+    // 阶段才炸在 KeytoolException: Tag number over 30 is not supported。
+    return store.isFile && store.length() > 0L && pwd.isNotEmpty()
 }
 
 android {
