@@ -60,6 +60,8 @@ add_library(texinject SHARED
         common/PyFunctionsAddress.cpp
         scripts/PyHost.cpp
         scripts/ScriptRuntime.cpp
+        tp/TpModule.cpp
+        build_import/ContainerOpenPacketSenderThunks.S
 
         # ---- 建筑工具：游戏 hook ----
         tp/MinecraftUpdateHook.cpp
