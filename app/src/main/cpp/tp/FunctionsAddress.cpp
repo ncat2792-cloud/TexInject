@@ -66,6 +66,56 @@ uintptr_t FunctionsAddress::PythonUtils_PyModule_GetDictMC   = 0;
 uintptr_t FunctionsAddress::PythonUtils_PyRun_StringFlagsMC  = 0;
 uintptr_t FunctionsAddress::PythonUtils_PyGILState_ReleaseMC = 0;
 
+// ── 建筑工具用到的游戏函数 ──────────────────────────────────────────
+uintptr_t FunctionsAddress::Actor_getClientInstance = 0;
+uintptr_t FunctionsAddress::Actor_getDimension = 0;
+uintptr_t FunctionsAddress::Minecraft_update_Hook = 0;
+uintptr_t FunctionsAddress::Level_Render_Hook = 0;
+uintptr_t FunctionsAddress::ClientInstance_getCamera = 0;
+uintptr_t FunctionsAddress::newReceivePacket_Hook = 0;
+
+namespace {
+
+// 建筑侧地址表。只有 3.9.15 有核验过的值；其余版本留 0，建筑功能整体
+// 关闭而不是带着旧偏移跳进未映射内存。
+struct BuildOffsets {
+    uintptr_t actor_get_client_instance;
+    uintptr_t actor_get_dimension;
+    uintptr_t minecraft_update_hook;
+    uintptr_t level_render_hook;
+    uintptr_t client_instance_get_camera;
+    uintptr_t new_receive_packet_hook;
+};
+
+constexpr BuildOffsets kBuildOffsets3915{
+    0x74C673C,   // Actor::getClientInstance
+    0xD8E7554,   // Actor::getDimension
+    0x74C79FC,   // Actor::normalTick
+    0x7B73A54,   // Level::_render
+    0x7463BF4,   // ClientInstance::getCamera
+    0xA7905A4,   // newReceivePacket
+};
+
+void applyBuildOffsets(const BuildOffsets& o) {
+    FunctionsAddress::Actor_getClientInstance  = o.actor_get_client_instance;
+    FunctionsAddress::Actor_getDimension       = o.actor_get_dimension;
+    FunctionsAddress::Minecraft_update_Hook    = o.minecraft_update_hook;
+    FunctionsAddress::Level_Render_Hook        = o.level_render_hook;
+    FunctionsAddress::ClientInstance_getCamera = o.client_instance_get_camera;
+    FunctionsAddress::newReceivePacket_Hook    = o.new_receive_packet_hook;
+}
+
+void clearBuildOffsets() {
+    FunctionsAddress::Actor_getClientInstance  = 0;
+    FunctionsAddress::Actor_getDimension       = 0;
+    FunctionsAddress::Minecraft_update_Hook    = 0;
+    FunctionsAddress::Level_Render_Hook        = 0;
+    FunctionsAddress::ClientInstance_getCamera = 0;
+    FunctionsAddress::newReceivePacket_Hook    = 0;
+}
+
+}  // namespace
+
 static std::mutex g_detectMutex;
 static bool g_detected = false;
 
@@ -333,6 +383,7 @@ void zeroAll() {
     FunctionsAddress::PythonUtils_PyModule_GetDictMC   = 0;
     FunctionsAddress::PythonUtils_PyRun_StringFlagsMC  = 0;
     FunctionsAddress::PythonUtils_PyGILState_ReleaseMC = 0;
+    clearBuildOffsets();
 }
 
 void dumpSegs(const Img& img, const uintptr_t* table, const char* name) {
@@ -473,6 +524,13 @@ void FunctionsAddress::detect() {
     PythonUtils_PyModule_GetDictMC   = table[3];
     PythonUtils_PyRun_StringFlagsMC  = table[4];
     PythonUtils_PyGILState_ReleaseMC = table[5];
+
+    // 建筑侧：沿用同一张表的版本归属。
+    if (sel->addr == ADDR_3915) {
+        applyBuildOffsets(kBuildOffsets3915);
+    } else {
+        clearBuildOffsets();
+    }
     snprintf(g_reason, sizeof(g_reason), "ok %s", sel->name);
 
     LOGI("detect: 使用 %s 地址表 GIL=0x%lx addmod=0x%lx getdict=0x%lx runstr=0x%lx rel=0x%lx",

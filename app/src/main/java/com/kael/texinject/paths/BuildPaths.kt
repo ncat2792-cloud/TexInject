@@ -20,6 +20,65 @@ object BuildPaths {
     fun scriptsDir(context: Context): File =
         File(base(context), "pack_netease/scripts").apply { mkdirs() }
 
+    /**
+     * 建筑文件目录：pack_netease/build
+     *
+     * 投影/导入用的结构文件放这里（.mcstructure / .bdx / .schematic /
+     * .litematic / .mcworld / 像素画 .png）。与脚本目录分开，两边的文件
+     * 列表不会互相干扰。
+     */
+    fun buildDir(context: Context): File {
+        val dir = File(base(context), "pack_netease/build").apply { mkdirs() }
+        try {
+            val readme = File(dir, "说明.txt")
+            if (!readme.exists() || readme.readText() != BUILD_README) {
+                readme.writeText(BUILD_README)
+            }
+        } catch (e: Throwable) {
+        }
+        return dir
+    }
+
+    /** 建筑页扫描的文件后缀。 */
+    val BUILD_EXTENSIONS = listOf(
+        ".mcstructure", ".bdx", ".schematic", ".litematic",
+        ".mcworld", ".infcz", ".png"
+    )
+
+    private val BUILD_README = """【建筑文件目录说明】
+
+目录：pack_netease/build/
+
+把建筑结构文件放进本目录，然后在游戏内面板的「建筑」页选择即可。
+
+==================================================
+支持的格式
+==================================================
+  .mcstructure   基岩版结构文件
+  .bdx           BDX 建筑文件
+  .schematic     Schematic 文件
+  .litematic     Litematica 投影文件
+  .mcworld       基岩版世界包（导出用）
+  .infcz         本模块自己的建筑格式
+  .png           像素画导入（图片转方块）
+
+==================================================
+用法
+==================================================
+1) 导入：把文件放进本目录 -> 面板「建筑」页 -> 选择文件 -> 开始导入
+2) 投影：导入后可开启投影预览，方块以半透明方式显示
+3) 打印：站在投影附近开启打印，模块自动放置周围能够到的方块
+   范围是玩家周围约 6 格，太远的方块需要自己走近
+4) 导出：把自己建的建筑导出成文件，同样保存在本目录
+
+==================================================
+注意
+==================================================
+  · 建筑文件加载时会校验格式，损坏的文件不会被执行
+  · 导入/打印需要相应的建造权限，请遵守所在服务器的规则
+  · 同名文件会被覆盖，导出前建议改名备份
+"""
+
     fun iconDir(context: Context): File {
         val dir = File(base(context), "pack_netease/icon").apply { mkdirs() }
         try {

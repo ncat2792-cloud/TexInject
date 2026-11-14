@@ -26,4 +26,10 @@ public:
     }
 };
 
+// 只在整段 [target, target+required_size) 落在 libminecraftpe.so 的某个
+// 可执行 PT_LOAD 段里时返回 true。建筑侧的每个偏移在使用前都过这里，
+// 版本对不上时是一个明确的失败，而不是跳到未映射内存。
+bool ResolveMinecraftExecutableOffset(uintptr_t base_address, uintptr_t offset,
+                                      size_t required_size, uintptr_t* address);
+
 #endif

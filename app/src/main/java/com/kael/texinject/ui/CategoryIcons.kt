@@ -12,6 +12,7 @@ object CategoryIcons {
         "icons/cat_material.png",
         "icons/cat_music.png",
         "icons/cat_script.png",
+        "icons/cat_build.png",
         "icons/cat_hotkey.png",
         "icons/cat_settings.png"
     )

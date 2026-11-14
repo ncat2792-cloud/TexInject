@@ -7,6 +7,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -19,6 +20,15 @@
 #include "main.h"
 #include "mount/ResourceSourceHook.h"
 #include "plt/PltHook.h"
+// 建筑工具
+#include "build_import/BuildProjectionRenderer.h"
+#include "build_import/MapAnvilUiCloseBridge.h"
+#include "build_import/MapChestUiCloseBridge.h"
+#include "tp/BuildPacketReceiveHook.h"
+#include "tp/LoopbackPacketSenderCapture.h"
+#include "tp/MinecraftUpdateHook.h"
+#include "tp/FunctionsAddress.h"
+#include "tp/TpModule.h"
 #include "trace/IoTrace.h"
 #include "tp/PythonUtils.h"
 #include "common/Signatures.h"
@@ -83,6 +93,31 @@ void ensureBase() {
     }
 }
 
+// 建筑工具的 hook。
+//
+// 地址为 0 表示当前游戏版本没有核验过的偏移，直接跳过 —— 建筑页显示
+// 不可用，其余功能不受影响。这与「带着 3.9.15 的偏移去 3.10.5 装 hook」
+// 是两种完全不同的结果：后者会跳进未映射内存直接闪退。
+void installBuildHooks(uintptr_t base) {
+    if (FunctionsAddress::Minecraft_update_Hook == 0) {
+        LOGI("build hooks skipped: no verified offsets for this game build");
+        return;
+    }
+    if (!InitLoopbackPacketSenderCapture(base)) {
+        LOGE("build: LoopbackPacketSender capture failed");
+    }
+    if (!BuildPacketReceiveHook::isReceiveHookReady() && !BuildPacketReceiveHook::init(base)) {
+        LOGE("build: receive hook failed");
+    }
+    if (!InitMinecraftUpdateHook(base)) {
+        LOGE("build: tick hook failed");
+    }
+    if (!build_import::InitBuildProjectionHook(base)) {
+        LOGE("build: projection render hook failed");
+    }
+    LOGI("build hooks installed");
+}
+
 void waitForMinecraft() {
     for (int attempt = 0; attempt < 100; ++attempt) {
         const uintptr_t base = getModuleBase("libminecraftpe.so");
@@ -130,6 +165,7 @@ void waitForMinecraft() {
                     std::fclose(f);
                 }
             }
+            installBuildHooks(base);
             LOGI("waitForMinecraft: base ready, hook 等面板手动连接");
             return;
         }
@@ -530,6 +566,47 @@ const JNINativeMethod native_methods[] = {
     {"gameHandInfo",      "()Ljava/lang/String;", reinterpret_cast<void*>(gameHandInfo)},
 };
 
+// ── 建筑工具：地图界面关闭请求 ───────────────────────────────────────
+//
+// 服务器结算铁砧/箱子结果后客户端要主动关窗口，否则会一直停在「处理中」。
+// 这几个只把请求取回来，真正的界面操作在 Kotlin 层。
+jlong takePendingMapAnvilUiCloseRequest(JNIEnv*, jclass) {
+    return static_cast<jlong>(build_import::TakePendingMapAnvilUiCloseRequest());
+}
+jboolean isMapAnvilUiCloseStillSafe(JNIEnv*, jclass, jlong ticket) {
+    return build_import::IsMapAnvilUiCloseStillSafe(static_cast<uint64_t>(ticket))
+        ? JNI_TRUE : JNI_FALSE;
+}
+void markMapAnvilUiCloseDispatched(JNIEnv*, jclass, jlong ticket) {
+    build_import::MarkMapAnvilUiCloseDispatched(static_cast<uint64_t>(ticket));
+}
+jlong takePendingMapChestUiCloseRequest(JNIEnv*, jclass) {
+    return static_cast<jlong>(build_import::TakePendingMapChestUiCloseRequest());
+}
+jboolean isMapChestUiCloseStillSafe(JNIEnv*, jclass, jlong ticket) {
+    return build_import::IsMapChestUiCloseStillSafe(static_cast<uint64_t>(ticket))
+        ? JNI_TRUE : JNI_FALSE;
+}
+void markMapChestUiCloseDispatched(JNIEnv*, jclass, jlong ticket) {
+    build_import::MarkMapChestUiCloseDispatched(static_cast<uint64_t>(ticket));
+}
+
+const JNINativeMethod build_native_methods[] = {
+    {"ensureBuildToolsHooks", "()V", reinterpret_cast<void*>(ensureNativeHooks)},
+    {"takePendingMapAnvilUiCloseRequest", "()J",
+     reinterpret_cast<void*>(takePendingMapAnvilUiCloseRequest)},
+    {"isMapAnvilUiCloseStillSafe", "(J)Z",
+     reinterpret_cast<void*>(isMapAnvilUiCloseStillSafe)},
+    {"markMapAnvilUiCloseDispatched", "(J)V",
+     reinterpret_cast<void*>(markMapAnvilUiCloseDispatched)},
+    {"takePendingMapChestUiCloseRequest", "()J",
+     reinterpret_cast<void*>(takePendingMapChestUiCloseRequest)},
+    {"isMapChestUiCloseStillSafe", "(J)Z",
+     reinterpret_cast<void*>(isMapChestUiCloseStillSafe)},
+    {"markMapChestUiCloseDispatched", "(J)V",
+     reinterpret_cast<void*>(markMapChestUiCloseDispatched)},
+};
+
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
@@ -556,6 +633,28 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     }
     if (failed != 0) LOGE("%zu/%zu 个 native 方法没接上", failed, total);
 
+    // 建筑工具：注册到它自己的两个类上。
+    //
+    // 单独注册、失败只记日志不影响 TexInject 本体 —— 建筑功能不可用是
+    // 可接受的降级，整个模块全废不是。
+    {
+        jclass build_core = env->FindClass("com/vdl/kong520/NativeCore");
+        if (build_core) {
+            for (const JNINativeMethod& method : build_native_methods) {
+                if (env->RegisterNatives(build_core, &method, 1) == JNI_OK) continue;
+                if (env->ExceptionCheck()) env->ExceptionClear();
+                LOGE("建筑: RegisterNatives 失败 %s", method.name);
+            }
+            env->DeleteLocalRef(build_core);
+        } else {
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            LOGE("建筑: com/vdl/kong520/NativeCore 未找到，建筑功能不可用");
+        }
+        if (!RegisterTpModuleNatives(env)) {
+            LOGE("TpModule natives 注册失败，建筑功能不可用");
+        }
+    }
+
     {
         FILE* f = fopen("/proc/self/cmdline", "r");
         char cmd[256] = {0};
@@ -573,4 +672,42 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 
     std::thread(waitForMinecraft).detach();
     return JNI_VERSION_1_6;
+}
+
+// ── 建筑工具：可执行段地址解析 ──────────────────────────────────────
+//
+// 用 /proc/self/maps 而不是 dl_iterate_phdr。
+//
+// dl_iterate_phdr 回调里的 dlpi_name 在回调返回后可能失效；据此算出的基址
+// 会带垃圾高字节，于是「基址 + RVA」得到的地址可能根本不存在。maps 是内核
+// 给的文本快照，不依赖任何回调期指针。
+bool ResolveMinecraftExecutableOffset(uintptr_t base_address, uintptr_t offset,
+                                      size_t required_size, uintptr_t* address) {
+    if (!address) return false;
+    *address = 0;
+    if (!base_address || !offset || !required_size ||
+        base_address > std::numeric_limits<uintptr_t>::max() - offset) {
+        return false;
+    }
+    const uintptr_t target = base_address + offset;
+    if ((target & 0x3U) != 0) return false;
+
+    FILE* maps = std::fopen("/proc/self/maps", "r");
+    if (!maps) return false;
+    char line[1024];
+    bool ok = false;
+    while (std::fgets(line, sizeof(line), maps)) {
+        unsigned long long start = 0, end = 0, file_off = 0;
+        char perms[8] = {0};
+        if (std::sscanf(line, "%llx-%llx %7s %llx", &start, &end, perms, &file_off) != 4) continue;
+        if (perms[2] != 'x') continue;  // 第三位是 x 才是可执行
+        if (target < start) continue;
+        if (target + required_size > end) continue;
+        ok = true;
+        break;
+    }
+    std::fclose(maps);
+    if (!ok) return false;
+    *address = target;
+    return true;
 }

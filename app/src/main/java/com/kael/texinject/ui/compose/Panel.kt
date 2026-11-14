@@ -88,6 +88,7 @@ private fun catsFor(): List<String> {
         add("材质替换")
         add("音乐")
         add("脚本")
+        add("建筑")
         add("快捷键")
         add("扩展")
         add("设置")
@@ -425,6 +426,8 @@ private fun PanelCard(
                         }
                         "音乐" -> AndroidView({ MusicPlayer.buildView(activity) }, Modifier.fillMaxSize())
                         "脚本" -> AndroidView({ PyLoaderUi.buildView(activity) }, Modifier.fillMaxSize())
+                        // 建筑页自己管理滚动与列表高度，外面不再套 verticalScroll
+                        "建筑" -> BuildTab(activity)
                         "快捷键" -> {
                             val cfg = hkCfg
                             if (cfg != null) {
