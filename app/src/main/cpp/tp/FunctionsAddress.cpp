@@ -473,36 +473,54 @@ bool FunctionsAddress::pyTrace() {
 // 已经改过）就原样放过，不动别人的内存。
 namespace {
 
-// PyRun_StringFlags 内拦截调用点的相对偏移。反汇编核对：
-// 119c4b20 bl 编译 → 119c4b24 cbz → 119c4b38 bl 0x119314d4 → 119c4b3c cbz
-constexpr uintptr_t kBlockCallOffset = 0xCC;
+// 拦截函数被 6 个入口调用，不只 PyRun_StringFlags。
+//
+// 只打 PyRun_StringFlags 内那一处（+0xCC）不够：日志里 SCRIPT_SEC 仍会
+// 打出来，建筑的所有 Python 调用全部 fail。这 6 个位置的 BL 目标都是
+// 同一个拦截函数，逐一改掉才不会漏。
+//
+// 偏移来自对 3.10.5.301327 镜像（build-id a494de85）的全文扫描：
+// 找出所有 BL 到 0x119314D4 的指令。
+constexpr uintptr_t kBlockCalls[] = {
+    0x1190AC40,  // 0x1190AA34 + 0x20C
+    0x11946C18,  // 0x119469B4 + 0x264
+    0x11980778,  // 0x119806F0 + 0x88
+    0x119C49FC,  // PyRun_File 一带
+    0x119C4B38,  // PyRun_StringFlags + 0xCC
+    0x119C599C,  // 0x119C5938 + 0x64
+};
 constexpr uint32_t kNop = 0xD503201FU;
 
-bool patchScriptCompileBlock(uintptr_t base, uintptr_t run_flags_rva) {
-    if (base == 0 || run_flags_rva == 0) return false;
-    auto* site = reinterpret_cast<uint32_t*>(base + run_flags_rva + kBlockCallOffset);
-
-    const uint32_t original = *site;
-    // bl 编码：0x94000000 | imm26。只认 BL，别的（已经被改成 nop、或换版本）
-    // 一律不碰。
-    if ((original & 0xFC000000U) != 0x94000000U) {
-        LOGI("script block: call site is not a BL (0x%08x), left untouched", original);
-        return false;
-    }
-
+// 只对确实是 BL 的位置动手；不是 BL 说明版本不同或已打过，原样放过。
+bool patchScriptCompileBlock(uintptr_t base, uintptr_t /*run_flags_rva*/) {
+    if (base == 0) return false;
     const long page = sysconf(_SC_PAGESIZE);
-    void* page_start = reinterpret_cast<void*>(
-        reinterpret_cast<uintptr_t>(site) & ~static_cast<uintptr_t>(page - 1));
-    if (mprotect(page_start, static_cast<size_t>(page), PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-        LOGE("script block: mprotect failed: %s", std::strerror(errno));
-        return false;
+    int patched = 0;
+    for (uintptr_t site_rva : kBlockCalls) {
+        auto* site = reinterpret_cast<uint32_t*>(base + site_rva);
+        const uint32_t original = *site;
+        if ((original & 0xFC000000U) != 0x94000000U) {
+            LOGI("script block: 0x%lx is not a BL (0x%08x), skipped",
+                 (unsigned long)site_rva, original);
+            continue;
+        }
+        void* page_start = reinterpret_cast<void*>(
+            reinterpret_cast<uintptr_t>(site) & ~static_cast<uintptr_t>(page - 1));
+        if (mprotect(page_start, static_cast<size_t>(page),
+                     PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+            LOGE("script block: mprotect failed at 0x%lx: %s",
+                 (unsigned long)site_rva, std::strerror(errno));
+            continue;
+        }
+        *site = kNop;
+        __builtin___clear_cache(reinterpret_cast<char*>(site),
+                                reinterpret_cast<char*>(site) + 4);
+        mprotect(page_start, static_cast<size_t>(page), PROT_READ | PROT_EXEC);
+        ++patched;
     }
-    *site = kNop;
-    __builtin___clear_cache(reinterpret_cast<char*>(site), reinterpret_cast<char*>(site) + 4);
-    mprotect(page_start, static_cast<size_t>(page), PROT_READ | PROT_EXEC);
-
-    LOGI("script block: patched BL at 0x%lx -> NOP", (unsigned long)(base + run_flags_rva + kBlockCallOffset));
-    return true;
+    LOGI("script block: patched %d/%zu call sites", patched,
+         sizeof(kBlockCalls) / sizeof(kBlockCalls[0]));
+    return patched > 0;
 }
 
 }  // namespace

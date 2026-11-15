@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  资源保留清单。
+
+  enableShrinkResources 会按静态引用关系裁剪资源，但本模块有几处是按
+  「运行时拼出来的字符串」加载的，静态分析看不到：
+
+    · CategoryIcons 用 BUILTIN_ASSETS 数组取 icons/cat_*.png
+    · NowPlayingBar 取 icons/play.png、icons/pause.png
+    · ModuleRes 直接打开模块 APK 的 assets 目录
+
+  这些一旦被裁掉，表现是图标消失、播放条报 FileNotFoundException，
+  而不是编译期报错 —— 所以在这里显式点名。
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/*,@mipmap/*"
+    tools:shrinkMode="safe" />

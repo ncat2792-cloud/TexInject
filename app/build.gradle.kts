@@ -22,6 +22,14 @@ fun canSignRelease(): Boolean {
 android {
     namespace = "com.kael.texinject"
     compileSdk = 36
+
+    // assets/icons 下的图标是按运行时字符串取的（CategoryIcons 的数组、
+    // NowPlayingBar 的 "icons/play.png"），资源裁剪看不到引用关系会直接删掉，
+    // 表现为图标消失 / FileNotFoundException。res/raw/keep.xml 里点名保留，
+    // 这里再确保 png 不被压缩，路径保持原样。
+    androidResources {
+        noCompress += listOf("png")
+    }
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
