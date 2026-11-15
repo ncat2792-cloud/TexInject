@@ -620,7 +620,17 @@ void FunctionsAddress::detect() {
     // 3.10.x 之后 PyRun_StringFlags 编译完会无条件被拦截，必须打掉那条 bl。
     // 3.9.15 走的是 setExecLocked 全局开关，不需要改代码。
     if (sel->addr == ADDR_3105 || sel->addr == ADDR_310) {
-        patchScriptCompileBlock(Main::getBaseAddress(), PythonUtils_PyRun_StringFlagsMC);
+        // 用 detect 自己探测到的基址，不用 Main::getBaseAddress()。
+        //
+        // 两者可能不同：detect 走 probeLib() 校验过的映像起点，而 Main 里
+        // 存的是 /proc/self/maps 匹配到的第一行。用错的基址算出来的补丁地址
+        // 会落在别的映射上 —— 写进去也不报错，但拦截一点没改，表现就是
+        // 「patched 6/6」而 SCRIPT_SEC 照旧打印。
+        const uintptr_t patch_base = img.base != 0 ? img.base : Main::getBaseAddress();
+        patchScriptCompileBlock(patch_base, PythonUtils_PyRun_StringFlagsMC);
+        LOGI("script block: patch base=0x%lx (detect=%d, main=0x%lx)",
+             (unsigned long)patch_base, img.base != 0 ? 1 : 0,
+             (unsigned long)Main::getBaseAddress());
     }
 
     snprintf(g_reason, sizeof(g_reason), "ok %s", sel->name);
