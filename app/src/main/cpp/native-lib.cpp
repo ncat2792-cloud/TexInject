@@ -29,7 +29,6 @@
 #include "tp/MinecraftUpdateHook.h"
 #include "tp/FunctionsAddress.h"
 #include "tp/TpModule.h"
-#include "addrscan/Resolver.h"
 #include "trace/IoTrace.h"
 #include "tp/PythonUtils.h"
 #include "common/Signatures.h"
@@ -100,22 +99,16 @@ void ensureBase() {
 // 不可用，其余功能不受影响。这与「带着 3.9.15 的偏移去 3.10.5 装 hook」
 // 是两种完全不同的结果：后者会跳进未映射内存直接闪退。
 void installBuildHooks(uintptr_t base) {
-    // 3.10.x 的地址不能靠固定偏移（区段内平移量不一致，抄旧值会把 hook
-    // 装进别的函数中间）。先按特征解析：只有全部规则在该镜像上唯一命中
-    // 才会发布地址，否则一个 hook 都不装。
+    // 先按 build-id 选地址表。
     //
-    // 3.9.15 走 FunctionsAddress 的固定表，这边解析失败也不影响它。
-    if (FunctionsAddress::Minecraft_update_Hook == 0) {
-        std::string address_error;
-        bool retryable = false;
-        if (buildtools::addrscan::Initialize(&address_error, &retryable)) {
-            LOGI("addrscan: %s", buildtools::addrscan::StatusText().c_str());
-        } else {
-            LOGE("addrscan failed (%s): %s",
-                 retryable ? "retry later" : "terminal for this build",
-                 address_error.c_str());
-        }
-    }
+    // FunctionsAddress::detect() 原本只在 PythonUtils 的三个入口里懒调用，
+    // 而这里比任何 Python 调用都早，所以第一次进来时 Minecraft_update_Hook
+    // 还是 0 —— 之前 hook 一个都没装、坐标读不到，就是这个顺序问题。
+    // detect() 幂等，先叫一次让建筑侧地址就位。
+    FunctionsAddress::detect();
+    LOGI("build: %s, update_hook=0x%lx", FunctionsAddress::detectReason(),
+         (unsigned long)FunctionsAddress::Minecraft_update_Hook);
+
     if (FunctionsAddress::Minecraft_update_Hook == 0) {
         LOGI("build hooks skipped: no verified offsets for this game build");
         return;
@@ -191,7 +184,15 @@ void waitForMinecraft() {
     LOGE("libminecraftpe.so not found");
 }
 
-void ensureNativeHooks(JNIEnv*, jclass) { ensureBase(); }
+// 面板打开建筑页时会调这里。
+//
+// 启动期 so 可能还没映射完，installBuildHooks 会跳过；这里补一次，
+// 而且钩子本身是幂等的（已装过会直接返回）。
+void ensureNativeHooks(JNIEnv*, jclass) {
+    ensureBase();
+    const uintptr_t base = Main::getBaseAddress();
+    if (base != 0) installBuildHooks(base);
+}
 
 jboolean runPythonFile(JNIEnv* env, jclass, jstring jpath) {
     if (!jpath) return JNI_FALSE;

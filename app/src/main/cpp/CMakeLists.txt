@@ -63,9 +63,6 @@ add_library(texinject SHARED
         tp/TpModule.cpp
 
         # ---- 建筑工具：3.10.5 运行时地址解析 ----
-        addrscan/Arm64SignatureScanner.cpp
-        addrscan/GameImage.cpp
-        addrscan/Resolver.cpp
         build_import/ContainerOpenPacketSenderThunks.S
 
         # ---- 建筑工具：游戏 hook ----

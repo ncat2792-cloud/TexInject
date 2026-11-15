@@ -15,8 +15,25 @@
 # ---------- 2. JNI 反射查找的类：类名 + 方法名都不能动 ----------
 -keep class com.kael.texinject.nativecore.NativeCore { *; }
 
-# 所有 native 方法所在类：保类名与 native 方法名（JNI 按名字绑定）
--keepclasseswithmembernames,includedescriptorclasses class * {
+# 建筑工具的 JNI 类。JNI_OnLoad 用 FindClass + RegisterNatives 按名字绑定：
+#   com/vdl/kong520/NativeCore   地图界面关闭请求等 7 个入口
+#   com/vdl/kong520/TpModule     导入/投影/打印/导出 54 个入口
+#
+# 必须整类保留。只写 native <methods> 不够：这些方法在 Java 侧没有调用者，
+# R8 会把它们连同类一起判定为不可达删掉，RegisterNatives 随即报
+# "Failed to register native method ... in Anonymous-DexFile"，
+# 运行期一调就是 UnsatisfiedLinkError。
+-keep class com.vdl.kong520.NativeCore { *; }
+-keep class com.vdl.kong520.TpModule { *; }
+
+# 所有 native 方法：保类名、方法名，且不允许被删除。
+#
+# 原来的 -keepclasseswithmembernames 只保名字，不阻止 R8 把「没有 Java
+# 调用者」的 native 方法整个删掉 —— 而 JNI 恰恰只从 native 侧调用它们。
+-keepclasseswithmembers,allowshrinking,includedescriptorclasses class * {
+    native <methods>;
+}
+-keepclassmembers,includedescriptorclasses class * {
     native <methods>;
 }
 
